@@ -31,7 +31,7 @@ func ParseStringToTCPFlags(str string) (flags []TCPFlags) {
 	var binary string
 	bytestring := []byte(str)
 	for _, b := range bytestring {
-		bits := fmt.Sprintf("% 08b", b)
+		bits := fmt.Sprintf("% 09b", b)
 		binary += string(bits)
 	}
 
