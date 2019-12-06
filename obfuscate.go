@@ -1,18 +1,21 @@
-package tcpflagobfuscate
+package main
 
 import (
 	"fmt"
+
 	"github.com/google/gopacket"
+
 	//"github.com/google/gopacket/examples/util"
-	"github.com/google/gopacket/layers"
-	"golang.org/x/net/ipv4"
 	"log"
 	"net"
 	"strings"
+
+	"github.com/google/gopacket/layers"
+	"golang.org/x/net/ipv4"
 )
 
-// TCP Header Flags
-type TCPFlags struct {
+// TCPFlag contains the TCP flags to use for the request
+type TCPFlag struct {
 	NS  bool
 	CWR bool
 	ECE bool
@@ -26,8 +29,13 @@ type TCPFlags struct {
 	FIN bool
 }
 
-// Creates a slice of TCPFlags with the encoded string
-func ParseStringToTCPFlags(str string) (flags []TCPFlags) {
+// TCPFlags is an array of TCPFlag
+type TCPFlags []TCPFlag
+
+// New creates a new TCPFlags object given a string
+func New(str string) TCPFlags {
+	flags := make([]TCPFlag, 0)
+
 	var binary string
 	bytestring := []byte(str)
 	for _, b := range bytestring {
@@ -36,7 +44,8 @@ func ParseStringToTCPFlags(str string) (flags []TCPFlags) {
 	}
 
 	bits := strings.Split(binary, " ")
-	flag := TCPFlags{}
+
+	flag := TCPFlag{}
 	for _, b := range bits {
 		for i, ib := range b {
 			if ib == 49 {
@@ -81,12 +90,24 @@ func ParseStringToTCPFlags(str string) (flags []TCPFlags) {
 		}
 		flags = append(flags, flag)
 	}
-	return flags
+
+	return TCPFlags(flags)
 }
 
-func SendPacket(srcIPstr string, dstIPstr string, sport int, dport int, payloadstr string, flags TCPFlags) {
+func (flags TCPFlags) Send(srcIP, dstIP string, srcPort, dstPort int, payload string) error {
+	for _, x := range flags {
+		if err := sendPacket(srcIP, dstIP, srcPort, dstPort, payload, x); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func sendPacket(srcIPstr string, dstIPstr string, sport int, dport int, payloadstr string, flag TCPFlag) error {
 	var srcIP, dstIP net.IP
 
+	// Logic here is a bit awkward
 	srcIP = net.ParseIP(srcIPstr)
 	if srcIP == nil {
 		log.Printf("Non-IP Target: %q\n", srcIPstr)
@@ -123,15 +144,15 @@ func SendPacket(srcIPstr string, dstIPstr string, sport int, dport int, payloads
 		Urgent:  0,
 		Seq:     11050,
 		Ack:     0,
-		ACK:     flags.ACK,
-		SYN:     flags.SYN,
-		FIN:     flags.FIN,
-		RST:     flags.RST,
-		URG:     flags.URG,
-		ECE:     flags.ECE,
-		CWR:     flags.CWR,
-		NS:      flags.NS,
-		PSH:     flags.PSH,
+		ACK:     flag.ACK,
+		SYN:     flag.SYN,
+		FIN:     flag.FIN,
+		RST:     flag.RST,
+		URG:     flag.URG,
+		ECE:     flag.ECE,
+		CWR:     flag.CWR,
+		NS:      flag.NS,
+		PSH:     flag.PSH,
 	}
 
 	opts := gopacket.SerializeOptions{
@@ -144,30 +165,31 @@ func SendPacket(srcIPstr string, dstIPstr string, sport int, dport int, payloads
 	ipHeaderBuf := gopacket.NewSerializeBuffer()
 	err := ip.SerializeTo(ipHeaderBuf, opts)
 	if err != nil {
-		panic(err)
+		return err
 	}
 	ipHeader, err := ipv4.ParseHeader(ipHeaderBuf.Bytes())
 	if err != nil {
-		panic(err)
+		return err
 	}
 
 	tcpPayloadBuf := gopacket.NewSerializeBuffer()
 	payload := gopacket.Payload([]byte(payloadstr))
-	err = gopacket.SerializeLayers(tcpPayloadBuf, opts, &tcp, payload)
-	if err != nil {
-		panic(err)
+	if err := gopacket.SerializeLayers(tcpPayloadBuf, opts, &tcp, payload); err != nil {
+		return err
 	}
 
-	var packetConn net.PacketConn
 	var rawConn *ipv4.RawConn
-	packetConn, err = net.ListenPacket("ip4:tcp", dstIPstr)
+	packetConn, err := net.ListenPacket("ip4:tcp", dstIPstr)
 	if err != nil {
-		panic(err)
+		return err
 	}
 	rawConn, err = ipv4.NewRawConn(packetConn)
 	if err != nil {
-		panic(err)
+		return err
 	}
 
-	err = rawConn.WriteTo(ipHeader, tcpPayloadBuf.Bytes(), nil)
+	if err := rawConn.WriteTo(ipHeader, tcpPayloadBuf.Bytes(), nil); err != nil {
+		return err
+	}
+	return nil
 }
